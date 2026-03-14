@@ -13,5 +13,6 @@
         "required": ["input"],
         "title": "CountCharsInput",
         "type": "object"
-    }
+    },
+    "coding_language": "python"
 }
