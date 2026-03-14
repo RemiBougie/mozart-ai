@@ -1,0 +1,17 @@
+{
+    "name": "CountCharacters",
+    "callable_tool": true,
+    "client_type": "http",
+    "description": "Count the number of characters in a string",
+    "args_schema": {
+        "properties": {
+            "input": {
+            "title": "Input",
+            "type": "string"
+            }
+        },
+        "required": ["input"],
+        "title": "CountCharsInput",
+        "type": "object"
+    }
+}
