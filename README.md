@@ -1,9 +1,9 @@
 # /docker
 Where .env and docker-compose.yml are defined. At a minimum, docker-compose.yml includes the following service containers:
-- Controller : the Controller/API service that runs Functions and/or queues Functions in the Redis queue. This is also the service that serves HTML/JavaScript to the client
-- Redis : a queue service for Functions that need to be run on behalf of other Functions (e.g., an agent invoking a tool)
-- Neo4j : the graph database storing the state of the model
-- Tool_Call_Consumer : a consumer script that reads from the Redis queue and forwards requests to the Controller
+- Controller : *This is the only publicly exposed endpoint*. The Controller/API service that runs Functions and/or queues Functions in the Redis queue. This is also the service that serves HTML/JavaScript to the client
+- Redis : A queue service for Functions that need to be run on behalf of other Functions (e.g., an agent invoking a tool)
+- Neo4j : The graph database storing the state of the model
+- Tool_Call_Consumer : A consumer script that reads from the Redis queue and forwards requests to the Controller
 
 Other database containers can be added to the docker-compose.yml if local solutions are needed (e.g., CouchDB, Elasticsearch, MCP servers, etc.)
 
@@ -31,7 +31,7 @@ Node and relationship definitions used throughout the model that are not applica
 Node, relationship, functions, and view definitions that are application specific. A generic example is shown below:
 - `/example-node`
     - `ExampleNode.tsx` : the general layout for this AppNode, where views for child Functions are rendered as child components within this layout. 
-    - `config.json` : field definitions for this AppNode. Includes hard-coded definitions that are constant for all instances of this AppNode (e.g., node type and parent type) and variable definitions needed for node creation (e.g., a first_name field for a Person node, variable definitions dynamically populated into child node descriptions, Agent prompts)
+    - `config.json` : field definitions for this AppNode. Includes hard-coded definitions that are constant for all instances of this AppNode (e.g., node type and parent type) and variable definitions needed for node creation (e.g., a first_name field for a Person node, variable definitions dynamically populated into child node descriptions, Agent prompts). This also includes default configuration information for initialization (e.g., including the Agent's role for all appropriate tools)
     - `/functions`
         - `/example-function`
             - `example-function.py` : a Function definition for a single unit of work. Can be any coding language, Python used as an example. 
@@ -40,9 +40,7 @@ Node, relationship, functions, and view definitions that are application specifi
 
 
 
-# 
-
-## EXAMPLES NEEDED:
+# EXAMPLE FUNCTIONS NEEDED:
 - MCP Example
 - HITL Example
 - GCP Example
@@ -51,5 +49,27 @@ Node, relationship, functions, and view definitions that are application specifi
 
 
 
-## FOOD FOR THOUGHT
+# FOOD FOR THOUGHT
 - Where would a Terraform script live? How does it find and deploy the functions? Does it even need to be a Terraform script, or just CLI commands?
+- How should memory work? Doesn't seem like a good idea to have an infinitely growing context...
+
+- The model-views directory acts as a code repository for the app. Every time pushes are made to this repo:
+    - The frontend scripts should be rebuilt and redeployed
+    - The controller should update its config for the model
+    - Any cloud functions should be redeployed
+
+- For HITL purposes: the LLM responds with a tool call, but instead of the tool call invoking a Function, it sends a HITL message to the client. Instead of having the Controller hang until the client responds, it should save the callback_object and current state to the model. To pick up where it left off, the client sends a POST request to the corresponding Function with the run_id. That way, the Controller knows to associate the POST request with an existing run. Here are a few example scenarios:
+    - Scenario: what if the human is simply giving an approval for a tool's response? *Solution*: the tool runs, but in the configuration it has a `"post_invocation_approval": true` field. The Controller sees this flag, forwards the response to the human user for approval. If the human wants to make edits, it can do so in the client, which modifies the tool message that gets forwarded to the LLM. 
+    - Scenario: what if the human is simply giving an approval to *run* a tool? *Solution*: when the Agent issues a tool_call, the Controller checks if the `"pre_invocation_approval"` field in the Function config is `true`. If so, the Controller sends a message to the human user for permission to run the Function with the provided inputs. The user can edit the inputs before approval, and the modified inputs will be sent to the Function. If the user denies the request, then the tool response is "Agent was not granted permission to run this tool."
+    - Scenario: a user other than the requesting user needs to give approval first. For example, if Person A wants to invoke Person B's personal AI assistant, Person B might want to require manual approval before invocation. *Solution*: idk yet, this is a more complicated use case. Maybe instead of the `"approval_required"` field be a boolean, it could be an array of user IDs/roles corresponding to users who are authorized to give approval. The complication comes from sending notifications to users when their approval is requested...
+    - Scenario: an Agent wants human input as a tool result. **Solution**: this is just a `"pre_invocation_approval"` use case with empty fields (or hints or default values). A Function will still need to be written that will simply be a passthrough?
+    - How do the above scenarios work with MCP servers? 
+
+    **For now**: Example Function config fields requiring pre- or post-invocation approval:
+    "pre_invocation_approval": true     // Controller gets permission to run the Function. If denied, replace the tool result with "Agent was not granted permission to run this tool."
+    "post_invocation_approval": true    // Controller gets permission to pass the results of a Function to the Agent. Gives the user an opportunity to edit results. 
+
+    **ADVANCED**: Example Function config fields if other users' permissions are required:
+    "pre_invocation_approval": ["user_1"]  
+    "post_invocation_approval": ["user_1", "user_2"]
+    

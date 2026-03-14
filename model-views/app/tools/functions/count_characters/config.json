@@ -14,5 +14,8 @@
         "title": "CountCharsInput",
         "type": "object"
     },
-    "coding_language": "python"
+    "coding_language": "python",
+    "pre_invocation_approval": false,
+    "post_invocation_approval": false,
+    "display_tool_result": false
 }
