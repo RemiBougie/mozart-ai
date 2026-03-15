@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError, ConfigDict
 from typing import Optional, Literal, List, Annotated, Union
 from datetime import datetime
 
-## from logger import logger
+from logger import logger
 
 ## from auth import auth
 

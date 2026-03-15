@@ -1,6 +1,11 @@
 # /docker
 Where .env and docker-compose.yml are defined. At a minimum, docker-compose.yml includes the following service containers:
-- Controller : *This is the only publicly exposed endpoint*. The Controller/API service that runs Functions and/or queues Functions in the Redis queue. This is also the service that serves HTML/JavaScript to the client
+- Controller : *This is the only publicly exposed endpoint*. This container does all of the coordinating:
+    - Handles client requests, streaming back to the client, and HITL
+    - CRUD operations on the graph model
+    - Runs Functions: either directly, as Tool Calls (as requested by an Agent or other Functions), or as Tool Responses (responding to an Agent or other Functions)
+    - Adds messages to Redis to queue Functions
+    - Directs the client to render the appropriate Views/Components to display Function results
 - Redis : A queue service for Functions that need to be run on behalf of other Functions (e.g., an agent invoking a tool)
 - Neo4j : The graph database storing the state of the model
 - Tool_Call_Consumer : A consumer script that reads from the Redis queue and forwards requests to the Controller
@@ -26,6 +31,8 @@ Node and relationship definitions used throughout the model that are not applica
 - `/relationships` : definitions for relationships
     - `CONTAINS.json` : schema definition for a CONTAINS relationship between two AppNodes.
     - `HAS_FUNCTION.json` : schema definition for a HAS_FUNCTION relationship between an AppNode and a child FunctionNode. 
+    - `HAS_.json` : schema definition for a WAS_INVOKED relationship between a FunctionNode and a child InvocationNode OR between two InvocationNodes.
+    - `INVOKED.json` : schema definition for an INVOKED relationship between an InvocationNode to an InvocationNode of a different FunctionNode. 
 
 ## /app
 Node, relationship, functions, and view definitions that are application specific. A generic example is shown below:
@@ -48,6 +55,13 @@ Node, relationship, functions, and view definitions that are application specifi
 - HTTP Example
 
 
+# EXAMPLE HITL NEEDED:
+- Pre-invocation approval/edit/rejection : allows a Function to be run as a Tool
+- Post-invocation approval/edit/rejection : allows a Tool Response to be returned to the LLM
+
+(in the future, might implement requester/approver for specific tasks)
+
+
 
 # FOOD FOR THOUGHT
 - Where would a Terraform script live? How does it find and deploy the functions? Does it even need to be a Terraform script, or just CLI commands?
@@ -61,15 +75,20 @@ Node, relationship, functions, and view definitions that are application specifi
 - For HITL purposes: the LLM responds with a tool call, but instead of the tool call invoking a Function, it sends a HITL message to the client. Instead of having the Controller hang until the client responds, it should save the callback_object and current state to the model. To pick up where it left off, the client sends a POST request to the corresponding Function with the run_id. That way, the Controller knows to associate the POST request with an existing run. Here are a few example scenarios:
     - Scenario: what if the human is simply giving an approval for a tool's response? *Solution*: the tool runs, but in the configuration it has a `"post_invocation_approval": true` field. The Controller sees this flag, forwards the response to the human user for approval. If the human wants to make edits, it can do so in the client, which modifies the tool message that gets forwarded to the LLM. 
     - Scenario: what if the human is simply giving an approval to *run* a tool? *Solution*: when the Agent issues a tool_call, the Controller checks if the `"pre_invocation_approval"` field in the Function config is `true`. If so, the Controller sends a message to the human user for permission to run the Function with the provided inputs. The user can edit the inputs before approval, and the modified inputs will be sent to the Function. If the user denies the request, then the tool response is "Agent was not granted permission to run this tool."
-    - Scenario: a user other than the requesting user needs to give approval first. For example, if Person A wants to invoke Person B's personal AI assistant, Person B might want to require manual approval before invocation. *Solution*: idk yet, this is a more complicated use case. Maybe instead of the `"approval_required"` field be a boolean, it could be an array of user IDs/roles corresponding to users who are authorized to give approval. The complication comes from sending notifications to users when their approval is requested...
+    - Scenario: a user other than the requesting user needs to give approval first. For example, if Person A wants to invoke Person B's personal AI assistant, Person B might want to require manual approval before invocation. *Solution*: idk yet, this is a more complicated use case. Maybe instead of the `"approval_required"` field be a boolean, it could be an array of user IDs/roles corresponding to users who are authorized to give approval. The complication comes from sending notifications to users when their approval is requested... maybe every UserRoot node has Functions to send/receive messages to other UserRoots?
     - Scenario: an Agent wants human input as a tool result. **Solution**: this is just a `"pre_invocation_approval"` use case with empty fields (or hints or default values). A Function will still need to be written that will simply be a passthrough?
     - How do the above scenarios work with MCP servers? 
 
-    **For now**: Example Function config fields requiring pre- or post-invocation approval:
-    "pre_invocation_approval": true     // Controller gets permission to run the Function. If denied, replace the tool result with "Agent was not granted permission to run this tool."
-    "post_invocation_approval": true    // Controller gets permission to pass the results of a Function to the Agent. Gives the user an opportunity to edit results. 
+    - **For now**: Example Function config fields requiring pre- or post-invocation approval:
+        - "pre_invocation_approval": true     // Controller gets permission to run the Function. If denied, replace the tool result with "Agent was not granted permission to run this tool."
+        - "post_invocation_approval": true    // Controller gets permission to pass the results of a Function to the Agent. Gives the user an opportunity to edit results. 
 
-    **ADVANCED**: Example Function config fields if other users' permissions are required:
-    "pre_invocation_approval": ["user_1"]  
-    "post_invocation_approval": ["user_1", "user_2"]
+    - **ADVANCED**: Example Function config fields if other users' permissions are required. Includes a list people who *need permission*, and those who can *grant permission*.
+        - "pre_invocation_requester": ["user_1"]     // User 1 needs approval to invoke the Function
+        - "post_invocation_requester": ["user_2"]    // User 2 can invoke the Function, but they need someone else to approve the results
+        - "pre_invocation_approver": ["user_3"]      // User 3 can approve, edit, or deny User 1's request to invoke the Function
+        - "post_invocation_approver": ["user_4"]     // User 4 can approve, edit, or deny the results from User 2's Function invocation
+
+
+    - **ACTUALLY**, the pre/post- invocation requester/approver could be a property on the "HAS_EXECUTOR" relationship. If the user/agent isn't included in the "write" permissions, then the model should check to see if their uid/role is included in the pre/post requester properties. If so, then their request has to get forwarded to users/agents in the pre/post approver property list. 
     
